@@ -102,85 +102,121 @@ module thomson_musiquejeu(
 
 	wire cs = !_E7CX & A[3] & A[2];
 	wire [1:0] rs = {A[0], A[1]};
-
-	//Peripherals
-	//A[7:0], B[7:6], B[3:2] are inputs for respectively joy directions, 1st Buttons and 2nd Buttons
-	//B[5:0] are outputs for the sound generation
-	//For simplification we consider that a read from peripheral register will get the unbuffered peripheral inputs, and a write will set the SND register
-	reg [5:0] snd = 6'b0;
-	assign SON = snd;
 	
 	//Register selection
-	//We need to track whether DDR or OR register is accessed to avoid playing direction selection as sound
-	reg [1:0] ddr = 2'b0;
-	
-	//Interrupts
-	//Interrupts are disabled by default
-	//CA1, CA2, CB1 and CB2 are wired respectively to 2nd and 1st Buttons of 1st port and 2nd and 1st Buttons of 2nd port
-	//CA1 and CB1 (2nd buttons) transition direction is selectable
-	//For simplification all interrupts are combined to one single signal
-	reg [3:0] inten = 4'b0;
-	reg [3:0] inttr = 4'b0; //0 for high to low, 1 for low to high
-	reg intr = 1'b0;
-	assign _IRQ = !intr;
-	
-	//Peripheral registers
-	// - Only B[5:0] are outputs; A[7:0] and B[7:6] are only inputs here
-	//reg [5:0] PRB = 6'b0;
-	 
-	//Data direction registers
-	// - Only B[3:2] are bidirectional, either second button input or snd output
-	//reg [3:2] DDRB = 2'b0;
-	 
+		
 	//Control registers
 	// - writable CRB[2] in order to set data direction
 	// - writable CRA[0] and CRB[0] to enable CA1 and CB1 interrupts
 	// - writable CRA[3] and CRB[3] in conjunction to CRA[5]=0 or CRB[5]=0 to enable CA2 and CB2 interrupts
 	// - readable CRA[7:6] and CRB[7:6] as interrupt flags, cleared on read
 	// - maybe CRAB[1] and CRAB[3] for interrupt transition selection ?
-	//reg [3:2] CRA = 6'b0;
+	//here we need to simulate read and write operation since sddrive selector use them to detect the expansion
+	reg [7:0] cra = 8'b0;
+	reg [7:0] crb = 8'b0;
 	
-	//Write operations
-	wire outset = cs & !rs[0] & !RW & E;
-	wire outclr = !_RST;
-	always @(posedge outset, posedge outclr)
-		if(outclr)
-			snd <= 6'b0;
-		else if(rs[1]==1'b1 & ddr[1]==1'b1)
-			snd <= D[5:0];
-	 
-	//read operations
-	//here we don't care if DDR or Peripheral register is selected. Maybe we should ?
-	assign D_o[7:0]= rs[1]?{J2[4],J1[4],1'b1,1'b1,J2[5],J1[5],1'b1,1'b1}:{J2[3],J2[2],J2[1],J2[0],J1[3],J1[2],J1[1],J1[0]};
-	assign D_oe = cs & !rs[0] & RW & E;
-
 	//Setting and reset of control registers
 	wire regset = cs & rs[0] & !RW & E;
 	wire regclr = !_RST;
 	always @(posedge regset, posedge regclr)
 		if(regclr) begin
-			inten <= 4'b0;
-			inttr <= 4'b0;
-			ddr <= 2'b0;
+			cra[5:0] <= 6'b0;
+			crb[5:0] <= 6'b0;
 		end
-		else if(rs[1]==1'b0) begin //0 for A, 1 for B
-			{inten[1], inttr[1], ddr[0]} <= {D[0], D[1], D[2]};
-			if(D[5]) //only when CA2 is input
-				{inten[0], inttr[0]} <= {D[3], D[4]};
+		else if(!rs[1]) //0 for A, 1 for B
+			cra[5:0] <= D[5:0];
+		else
+			crb[5:0] <= D[5:0];
+
+	//Data direction registers
+	// - Only B[3:2] are bidirectional, either second button input or snd output
+	//here we dont care since we have separate pins for them: write op goes to output and read comes from input 
+	reg [7:0] ddra = 8'b0;
+	reg [7:0] ddrb = 8'b0;
+	 
+	//Peripheral registers
+	
+	//- B[5:0] are outputs for the sound generation
+	reg [7:0] pb_out = 8'b0;
+	assign SON = ddrb[5:0] & pb_out[5:0];
+
+	//- A[7:0], B[7:6], B[3:2] are inputs for respectively joy directions, 1st Buttons and 2nd Buttons
+	wire [7:0] pa_in = {J2[3],J2[2],J2[1],J2[0],J1[3],J1[2],J1[1],J1[0]};
+	wire [7:0] pb_in = {ddrb[7]?pb_out[7]:J2[4], ddrb[6]?pb_out[6]:J1[4], ddrb[5]?pb_out[5]:1'b1, ddrb[4]?pb_out[4]:1'b1, ddrb[3]?pb_out[3]:J2[5], ddrb[2]?pb_out[2]:J1[5], ddrb[1]?pb_out[1]:1'b1, ddrb[0]?pb_out[0]:1'b1};
+	 
+	//Write operations to output and ddr register
+	//We need to track whether DDR or OR register is accessed to avoid playing direction selection as sound
+	//snd on port B is our only output and read op port A would be affected by joy position even in output anyway, so we ignore port A output
+	wire outset = cs & !rs[0] & !RW & E;
+	wire outclr = !_RST;
+	always @(posedge outset, posedge outclr)
+		if(outclr) begin
+			pb_out <= 8'b0;
+			ddra <= 8'b0;
+			ddrb <= 8'b0;
 		end
-		else begin
-			{inten[3], inttr[3], ddr[1]} <= {D[0], D[1], D[2]};
-			if(D[5]) //only when CB2 is input
-				{inten[2], inttr[2]} <= {D[3], D[4]};
-		end
+		else if(rs[1] & crb[2])
+			pb_out <= D;
+		else if(!rs[1] & !cra[2])
+			ddra <= D;
+		else if(rs[1] & !crb[2])
+			ddrb <= D;
+			
+	//read operations
+	//here we don't care if DDR or Peripheral register is selected. Maybe we should ?
+	assign D_o[7:0]= rs[0]? (rs[1]?crb:cra) : (rs[1]? (crb[2]?pb_in:ddrb) : (cra[2]?pa_in:ddra));
+	assign D_oe = cs & RW & E;
+
+	//Interrupts
+	//Interrupts are disabled by default
+	//CA1, CA2, CB1 and CB2 are wired respectively to 2nd and 1st Buttons of 1st port and 2nd and 1st Buttons of 2nd port
+	//CA1 and CB1 (2nd buttons) transition direction is selectable
+	//All interrupts are combined to the _IRQ pin
 
 	//Interrupt set and clear
-	wire intset = (inten[0]&(inttr[0]?J1[4]:!J1[4])) | (inten[1]&(inttr[1]?J1[5]:!J1[5])) | (inten[2]&(inttr[2]?J2[4]:!J2[4])) | (inten[3]&(inttr[3]?J2[5]:!J2[5]));
-	wire intclr = !_RST | (cs & !rs[0] & RW & E); //reset or read of the register !
-	always @(posedge intset, posedge intclr)
-		if(intclr)
-			intr <= 1'b0;
-		else
-			intr <= 1'b1; //intset ?
+	//Properly detect transistions on interrupt inputs otherwise an interrupt will fire inside sddrive selector during expansion detection that will not be serviced and will lock the system when exiting the selector
+	wire ca1 = J1[5];
+	wire ca2 = J1[4];
+	wire cb1 = J2[5];
+	wire cb2 = J2[4];
+	reg ca1p = 1'b0;
+	reg ca2p = 1'b0;
+	reg cb1p = 1'b0;
+	reg cb2p = 1'b0;
+	always @(posedge E) begin
+		ca1p <= ca1;
+		ca2p <= ca2;
+		cb1p <= cb1;
+		cb2p <= cb2;
+	end
 	
+	wire irqa1set = cra[0] & (cra[1] ? (!ca1p&ca1) : (ca1p&!ca1));
+	wire irqa2set = (!cra[5]) & cra[3] & (cra[4] ? (!ca2p&ca2) : (ca2p&!ca2));
+	wire irqaclr = !_RST | (cs & !rs[0] & !rs[1] & cra[2] & RW & E);  //reset or read of the register !
+	wire irqb1set = crb[0] & (crb[1] ? (!cb1p&cb1) : (cb1p&!cb1));
+	wire irqb2set = (!crb[5]) & crb[3] & (crb[4] ? (!cb2p&cb2) : (cb2p&!cb2));
+	wire irqbclr = !_RST | (cs & !rs[0] & rs[1] & crb[2] & RW & E); //reset or read of the register !
+	always @(posedge irqa1set, posedge irqaclr)
+		if(irqaclr)
+			cra[7] <= 1'b0;
+		else
+			cra[7] <= 1'b1;
+	always @(posedge irqa2set, posedge irqaclr)
+		if(irqaclr)
+			cra[6] <= 1'b0;
+		else
+			cra[6] <= 1'b1;
+	always @(posedge irqb1set, posedge irqbclr)
+		if(irqbclr)
+			crb[7] <= 1'b0;
+		else
+			crb[7] <= 1'b1;
+	always @(posedge irqb2set, posedge irqbclr)
+		if(irqbclr)
+			crb[6] <= 1'b0;
+		else
+			crb[6] <= 1'b1;
+			
+	assign _IRQ = !( cra[6] | cra[7] | crb[6] | crb[7] ); //IRQA and IRQB pins are tied together
+
 endmodule
