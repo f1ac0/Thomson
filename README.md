@@ -3,7 +3,7 @@ Kids in the 80's in France discovered computers at school with the TO and MO ser
 
 Interesting expansions exist to enjoy these systems, see below.
 
-In this repository I share the boards I modified for my own needs (for example to use the parts I have in stock, or because I like my own routing). At the time of writing, some are still untested. 
+In this repository I share the boards I modified for my own needs, for example to use the parts I have in stock, or because I like my own routing.
 
 # Disclaimer and Acknowledgements
 This is a hobbyist project, it comes with no warranty and no support. Also remember that the Commodore machines are about 40 years old and may fail because of such hardware expansions.
